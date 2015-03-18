@@ -3,6 +3,7 @@ local Module = nn.Module
 Module.__parameters__ = {'weight', 'bias'}
 Module.__gradParameters__ = {'gradWeight', 'gradBias'}
 
+-- TODO make this recursive (for table params)
 function Module:sharedClone(shareParams, shareGradParams)
    local moduleClones, modules
    if self.modules then
@@ -14,13 +15,16 @@ function Module:sharedClone(shareParams, shareGradParams)
       self.modules = nil
    end
    
-   local params = {}
+   local params, pointers = {}, {}
    if shareParams then
       for i,paramName in ipairs(self.__parameters__) do
          local param = self[paramName]
          if param then
             params[paramName] = param
             self[paramName] = nil
+            if param:storage() then
+               pointers[torch.pointer(param:storage():data())] = true
+            end
          end
       end
    end
@@ -28,6 +32,19 @@ function Module:sharedClone(shareParams, shareGradParams)
       for i,paramName in ipairs(self.__gradParameters__) do
          local gradparam = self[paramName]
          if gradParam then
+            params[paramName] = gradParam
+            self[paramName] = nil
+            if gradParam:storage() then
+               pointers[torch.pointer(gradParam:storage():data())] = true
+            end
+         end
+      end
+   end
+   
+   -- find all the tensors that share storage with the shared params
+   for name, param in pairs(self) do
+      if torch.isTensor(param) and param:storage() then
+         if pointers[torch.pointer(param:storage():data())] then
             params[paramName] = param
             self[paramName] = nil
          end
@@ -39,7 +56,6 @@ function Module:sharedClone(shareParams, shareGradParams)
    
    for paramName, param in pairs(params) do
       self[paramName] = param
-      -- TODO make this recursive (for table params)
       clone[paramName] = param.new():set(param)
    end
    
